@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Scanner Helper
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Helps identify the correct field for scanning and auto-sorts by time
 // @author       You
 // @match https://cohmis.clarityhs.com/passport
@@ -12,11 +12,23 @@
 (function() {
     'use strict';
 
+    // ============================================================================
+    // DEVICE CONFIGURATION - CHANGE THIS LINE FOR EACH DEVICE
+    // ============================================================================
+    const DINING_ROOM = "Food: Dining Room: Hot Meal";
+    const TRAILER_PROTEIN = "Food: Trailer: Protein";
+    const TRAILER_HOT_MEAL = "Food: Trailer: Hot Meal";
+
+    const EXPECTED_SERVICE = DINING_ROOM;  // Change this for each device
+    // Options: DINING_ROOM, TRAILER_PROTEIN, TRAILER_HOT_MEAL
+    // ============================================================================
+
     console.log("Scanner Helper: Script loaded");
 
     let scannerActive = false;
     let overlay = null;
     let highlight = null;
+    let serviceHighlight = null;
     let statusInterval = null;
     let sortInterval = null;
 
@@ -32,6 +44,11 @@
         // Force create highlight
         if (!highlight) {
             createHighlight();
+        }
+
+        // Force create service highlight
+        if (!serviceHighlight) {
+            createServiceHighlight();
         }
 
         // Start all functionality
@@ -116,6 +133,29 @@
         document.body.appendChild(highlight);
     }
 
+    function createServiceHighlight() {
+        console.log("Scanner Helper: Creating service highlight");
+
+        // Remove existing service highlight if any
+        const existing = document.getElementById('service-highlight-helper');
+        if (existing) existing.remove();
+
+        serviceHighlight = document.createElement('div');
+        serviceHighlight.id = 'service-highlight-helper';
+        serviceHighlight.style.cssText = `
+            position: absolute !important;
+            border: 4px solid red !important;
+            border-radius: 8px !important;
+            background: rgba(255, 0, 0, 0.1) !important;
+            pointer-events: none !important;
+            z-index: 999998 !important;
+            display: none !important;
+            animation: pulse 1.5s infinite !important;
+        `;
+
+        document.body.appendChild(serviceHighlight);
+    }
+
     function deactivateScanner() {
         scannerActive = false;
 
@@ -129,6 +169,11 @@
             highlight = null;
         }
 
+        if (serviceHighlight) {
+            serviceHighlight.remove();
+            serviceHighlight = null;
+        }
+
         if (statusInterval) {
             clearInterval(statusInterval);
             statusInterval = null;
@@ -140,10 +185,22 @@
         }
     }
 
+    function checkServiceSelection() {
+        const serviceDropdown = document.getElementById('service');
+        if (!serviceDropdown) return { isCorrect: true, selectedText: 'Unknown' };
+
+        const selectedOption = serviceDropdown.options[serviceDropdown.selectedIndex];
+        const selectedText = selectedOption ? selectedOption.text : 'None';
+        const isCorrect = selectedText === EXPECTED_SERVICE;
+
+        return { isCorrect, selectedText };
+    }
+
     function updateStatus() {
         if (!overlay) return;
 
         const activeElement = document.activeElement;
+        const serviceCheck = checkServiceSelection();
 
         // Look for the unique identifier field in multiple ways
         const targetField = document.getElementById('uniqueId') ||
@@ -156,33 +213,56 @@
         const isCorrectField = activeElement && targetField && activeElement === targetField;
         const anyInputFocused = activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA');
 
-        if (isCorrectField || anyInputFocused) {
+        // Check if service is incorrect first (highest priority)
+        if (!serviceCheck.isCorrect) {
+            overlay.style.background = '#f4d4d4';
+            overlay.style.borderColor = '#f44336';
+            overlay.style.color = '#C62828';
+            overlay.innerHTML = '<div style="margin-bottom: 10px;">❌</div><div style="font-size: 16px; line-height: 1.3;">Wrong Service Selected!<br/>Change to:<br/><strong>' + EXPECTED_SERVICE + '</strong></div>';
+
+            // Highlight the service dropdown
+            const serviceDropdown = document.getElementById('service');
+            if (serviceDropdown && serviceHighlight) {
+                highlightElement(serviceDropdown, serviceHighlight);
+            }
+
+            // Hide field highlight
+            if (highlight) highlight.style.display = 'none';
+        }
+        // Then check field selection
+        else if (isCorrectField || anyInputFocused) {
             overlay.style.background = '#d4f4d4';
             overlay.style.borderColor = '#4CAF50';
             overlay.style.color = '#2E7D32';
             overlay.innerHTML = '<div style="margin-bottom: 10px;">✅</div><div>Ready To Scan</div>';
             if (highlight) highlight.style.display = 'none';
+            if (serviceHighlight) serviceHighlight.style.display = 'none';
         } else {
             overlay.style.background = '#f4d4d4';
             overlay.style.borderColor = '#f44336';
             overlay.style.color = '#C62828';
-            overlay.innerHTML = '<div style="margin-bottom: 10px;">⚠️</div><div style="font-size: 18px; line-height: 1.3;">Tap Glowing Box to Right of<br>\"Unique Identifier\"</div>';
+            overlay.innerHTML = '<div style="margin-bottom: 10px;">⚠️</div><div style="font-size: 18px; line-height: 1.3;">Tap Glowing Box to Right of<br/>"Unique Identifier"</div>';
 
             if (targetField && highlight) {
-                highlightField(targetField);
+                highlightElement(targetField, highlight);
             }
+            if (serviceHighlight) serviceHighlight.style.display = 'none';
         }
     }
 
-    function highlightField(element) {
-        if (!element || !highlight) return;
+    function highlightElement(element, highlightDiv) {
+        if (!element || !highlightDiv) return;
 
         const rect = element.getBoundingClientRect();
-        highlight.style.display = 'block';
-        highlight.style.left = (rect.left + window.scrollX - 6) + 'px';
-        highlight.style.top = (rect.top + window.scrollY - 6) + 'px';
-        highlight.style.width = (rect.width + 12) + 'px';
-        highlight.style.height = (rect.height + 12) + 'px';
+        highlightDiv.style.display = 'block';
+        highlightDiv.style.left = (rect.left + window.scrollX - 6) + 'px';
+        highlightDiv.style.top = (rect.top + window.scrollY - 6) + 'px';
+        highlightDiv.style.width = (rect.width + 12) + 'px';
+        highlightDiv.style.height = (rect.height + 12) + 'px';
+    }
+
+    function highlightField(element) {
+        highlightElement(element, highlight);
     }
 
     function makeDraggable(element) {
@@ -319,9 +399,6 @@
     // INITIALIZATION
     console.log("Scanner Helper: Setting up initialization");
 
-
     forceInitialize();
-
-
 
 })();
